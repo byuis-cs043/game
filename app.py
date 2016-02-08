@@ -1,13 +1,11 @@
 """Main web application.
 
-Uses classes DB and RPS to provide a Rock Paper Scissors game. With a different game class than RPS and slight
-modifications it can be made into another game.
+RPS game for deployment on a WSGI server; uses a MySQL database.
 """
 
-import wsgiref.simple_server
 import urllib.parse
 import http.cookies
-from db_sqlite import DB
+from db_mysql import DB
 from rps import RPS
 
 
@@ -383,6 +381,3 @@ def application(e, start_response):
     else:
         start_response('200 OK', headers)
         return [(page + 'Unknown Web app {}</body></html>'.format(path_info)).encode()]
-
-httpd = wsgiref.simple_server.make_server('', 8000, application)
-httpd.serve_forever()

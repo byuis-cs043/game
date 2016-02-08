@@ -1,22 +1,20 @@
-"""All sqlite3 dependencies.
+"""All MySQL dependencies."""
 
-All sqlite3 dependent code is collected in this module. The rest of the game app will be isolated from direct
-interaction with sqlite3. This makes it easy to replace sqlite3 with a different database. Only the code in this
-module needs to be adapted for a different database. The rest of the app will work the same.
-"""
-
-import sqlite3
+import pymysql
 import json
 
 
 class DB:
     """Miscellaneous functions for checking username & password, fetching games, updating scores etc."""
     def __init__(self):
-        self.connection = sqlite3.connect('game.db')
+        self.connection = pymysql.connect(
+            unix_socket='/var/run/mysqld/mysqld.sock',
+            user='umpire', passwd='fda323rf', db='game'
+        )
 
     def user_pass_valid(self, username, password):
         cursor = self.connection.cursor()
-        cursor.execute('SELECT name FROM user WHERE name = ? AND password = ?', [username, password])
+        cursor.execute('SELECT name FROM user WHERE name = %s AND password = %s', [username, password])
         if cursor.fetchone():
             return True
         else:
@@ -24,17 +22,17 @@ class DB:
 
     def add_username(self, username, password):
         cursor = self.connection.cursor()
-        cursor.execute('SELECT name FROM user WHERE name = ?', [username])
+        cursor.execute('SELECT name FROM user WHERE name = %s', [username])
         if cursor.fetchone():
             return False
         else:
-            cursor.execute('INSERT INTO user (name, password) VALUES (?, ?)', [username, password])
+            cursor.execute('INSERT INTO user (name, password) VALUES (%s, %s)', [username, password])
             self.connection.commit()
             return True
 
     def get_game_by_id(self, game_id):
         cursor = self.connection.cursor()
-        cursor.execute('SELECT players, goal, state, ts, turns FROM game WHERE rowid = ?', [game_id])
+        cursor.execute('SELECT players, goal, state, ts, turns FROM game WHERE rowid = %s', [game_id])
         return cursor.fetchone()
 
     def get_games_by_user(self, username):
@@ -42,7 +40,7 @@ class DB:
         cursor.execute(
             'SELECT game.rowid, players, goal, state, ts, turns '
             'FROM game, player '
-            'WHERE player.game_id = game.rowid AND playing AND user_name = ? '
+            'WHERE player.game_id = game.rowid AND playing AND user_name = %s '
             'ORDER BY 1', [username]
         )
         return cursor.fetchall()
@@ -53,7 +51,7 @@ class DB:
             'SELECT game_id, players, goal, ts, turns FROM game, ('
             ' SELECT rowid game_id FROM game WHERE state = 0 AND rowid NOT IN ('
             '  SELECT game.rowid FROM game, player'
-            '  WHERE state = 0 AND game.rowid = player.game_id AND player.user_name = ?'
+            '  WHERE state = 0 AND game.rowid = player.game_id AND player.user_name = %s'
             ' )'
             ') registering '
             'WHERE game.rowid = registering.game_id '
@@ -63,8 +61,8 @@ class DB:
 
     def new_game(self, players, goal, username):
         cursor = self.connection.cursor()
-        cursor.execute('INSERT INTO game (players, goal) VALUES (?, ?);', [players, goal])
-        cursor.execute('INSERT INTO player (game_id, user_name) VALUES (last_insert_rowid(), ?)', [username])
+        cursor.execute('INSERT INTO game (players, goal) VALUES (%s, %s);', [players, goal])
+        cursor.execute('INSERT INTO player (game_id, user_name) VALUES (last_insert_id(), %s)', [username])
         self.connection.commit()
 
     def join_game(self, game_id, username):
@@ -79,14 +77,14 @@ class DB:
             return
 
         cursor = self.connection.cursor()
-        cursor.execute('INSERT INTO player (game_id, user_name) VALUES (?, ?)', [game_id, username])
-        cursor.execute('SELECT count(*) FROM player WHERE game_id = ?', [game_id])
+        cursor.execute('INSERT INTO player (game_id, user_name) VALUES (%s, %s)', [game_id, username])
+        cursor.execute('SELECT count(*) FROM player WHERE game_id = %s', [game_id])
         (players_in_game,) = cursor.fetchone()
         if players_in_game == max_players:  # Players filled
-            cursor.execute('UPDATE game SET state = 1, ts = datetime() WHERE rowid = ?', [game_id])
+            cursor.execute('UPDATE game SET state = 1, ts = now() WHERE rowid = %s', [game_id])
             self.connection.commit()
         elif players_in_game < max_players:  # Waiting more players
-            cursor.execute('UPDATE game SET ts = datetime() WHERE rowid = ?', [game_id])
+            cursor.execute('UPDATE game SET ts = now() WHERE rowid = %s', [game_id])
             self.connection.commit()
         elif players_in_game > max_players:  # Too many players
             self.connection.rollback()
@@ -95,13 +93,13 @@ class DB:
         cursor = self.connection.cursor()
         cursor.execute(  # Find latest timestamps of players' game joins, quits, moves where user himself has not quit
             'SELECT max(ts) FROM game, player '
-            'WHERE player.user_name = ? AND player.playing AND player.game_id = game.rowid ', [username])
+            'WHERE player.user_name = %s AND player.playing AND player.game_id = game.rowid ', [username])
         (latest_timestamp_of_running_games,) = cursor.fetchone()
         cursor.execute(  # Latest timestamps of games waiting for registrations
             'SELECT max(ts) FROM game, ('
             ' SELECT rowid game_id FROM game WHERE state = 0 AND rowid NOT IN ('
             '  SELECT game.rowid FROM game, player'
-            '  WHERE state = 0 AND game.rowid = player.game_id AND player.user_name = ?'
+            '  WHERE state = 0 AND game.rowid = player.game_id AND player.user_name = %s'
             ' )'
             ') registering '
             'WHERE game.rowid = registering.game_id', [username]
@@ -114,9 +112,9 @@ class DB:
         cursor = self.connection.cursor()
         cursor.execute(
             'SELECT state FROM player, game '
-            'WHERE player.user_name = ?'
+            'WHERE player.user_name = %s'
             ' AND player.game_id = game.rowid'
-            ' AND game.rowid = ?',
+            ' AND game.rowid = %s',
             [username, game_id]
         )
         game = cursor.fetchone()
@@ -127,20 +125,20 @@ class DB:
         (game_state,) = game
 
         if game_state == 0:  # Still registering players
-            cursor.execute('DELETE FROM player WHERE user_name = ? AND game_id = ?', [username, game_id])
-            cursor.execute('SELECT count(*) FROM player WHERE game_id = ?', [game_id])
+            cursor.execute('DELETE FROM player WHERE user_name = %s AND game_id = %s', [username, game_id])
+            cursor.execute('SELECT count(*) FROM player WHERE game_id = %s', [game_id])
             (remaining_players,) = cursor.fetchone()
             if remaining_players > 0:
-                cursor.execute('UPDATE game SET ts = datetime() WHERE rowid = ?', [game_id])
+                cursor.execute('UPDATE game SET ts = now() WHERE rowid = %s', [game_id])
             else:
-                cursor.execute('DELETE FROM game WHERE rowid = ?', [game_id])
+                cursor.execute('DELETE FROM game WHERE rowid = %s', [game_id])
                 # Minor prob: Reg list will not update if a newer game is in the list
             self.connection.commit()
         else:
             cursor.execute(
-                'UPDATE player SET playing = 0 WHERE user_name = ? AND game_id = ?', [username, game_id]
+                'UPDATE player SET playing = 0 WHERE user_name = %s AND game_id = %s', [username, game_id]
             )
-            cursor.execute('UPDATE game SET ts = datetime() WHERE rowid = ?', [game_id])
+            cursor.execute('UPDATE game SET ts = now() WHERE rowid = %s', [game_id])
             self.connection.commit()
 
     def dump(self):
@@ -179,7 +177,7 @@ class Game:
 
         self.connection = connection
         cursor = connection.cursor()
-        cursor.execute('SELECT user_name, score, playing FROM player WHERE game_id = ? ORDER BY rowid', [game_id])
+        cursor.execute('SELECT user_name, score, playing FROM player WHERE game_id = %s ORDER BY rowid', [game_id])
         self.players = [{'name': n, 'score': s, 'playing': p} for n, s, p in cursor.fetchall()]
 
     def player_index(self, username):
@@ -198,24 +196,24 @@ class Game:
         player = self.players[index]
         cursor = self.connection.cursor()
         cursor.execute(
-            'UPDATE player SET score = ? '
-            'WHERE user_name = ? AND game_id = ?', [player['score'], player['name'], self.id])
+            'UPDATE player SET score = %s '
+            'WHERE user_name = %s AND game_id = %s', [player['score'], player['name'], self.id])
         # Commit in save_game_state()
 
     def set_game_over(self):
         """Set game status to game over."""
         self.state = 2  # Game over
         cursor = self.connection.cursor()
-        cursor.execute('UPDATE game SET state = 2 WHERE rowid = ?', [self.id])
+        cursor.execute('UPDATE game SET state = 2 WHERE rowid = %s', [self.id])
         # Commit in save_game_state()
 
     def save_game_state(self):
         """Save game state to database."""
         cursor = self.connection.cursor()
         cursor.execute(
-            'UPDATE game SET turns = ?, ts = datetime() '
-            'WHERE rowid = ?', [json.dumps(self.turns), self.id])
+            'UPDATE game SET turns = %s, ts = now() '
+            'WHERE rowid = %s', [json.dumps(self.turns), self.id])
         self.connection.commit()
         cursor = self.connection.cursor()
-        cursor.execute('SELECT ts FROM game WHERE rowid = ?', [self.id])
+        cursor.execute('SELECT ts FROM game WHERE rowid = %s', [self.id])
         self.ts = cursor.fetchone()[0]

@@ -6,7 +6,7 @@ by the Game class. To make a different game, replace the RPS class by another th
 When a user accesses a game e.g. to make a move, an RPS object is constructed from information in the database.
 """
 
-from db_sqlite import Game
+from db_mysql import Game
 
 
 class RPS(Game):
