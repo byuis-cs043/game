@@ -1,9 +1,14 @@
-"""Main web application."""
+"""Main web application.
+
+Uses classes DB and RPS to provide a Rock Paper Scissors game. With a different game class than RPS and slight
+modifications it can be made into another game.
+"""
 
 import wsgiref.simple_server
 import urllib.parse
 import http.cookies
 from db_sqlite import DB
+from rps import RPS
 
 
 def application(e, start_response):
@@ -93,24 +98,205 @@ def application(e, start_response):
             start_response('200 OK', headers)
             page += '<a href="{}/login_register">Log in or register</a> to play</body></html>'.format(app_root)
             return [page.encode()]
-        else:
+
+        page += '{} | <a href="{}/logout">Logout</a>'.format(session_user, app_root)
+        page += ' | <a href="{}">Refresh</a>'.format(app_root)
+        page += '<h2>My games</h2>\n'
+        page += '<table><tr><th>Game</th><th>Goal</th><th>Quit</th><th>State</th><th>Players</th></tr>\n'
+        games = [RPS(i, p, g, st, ts, t, db.connection) for i, p, g, st, ts, t in db.get_games_by_user(session_user)]
+        for game in games:
+            page += '<tr><td>{}</td><td>{}</td><td><a href="{}/quit?id={}">quit</a></td>'.format(
+                game.id, game.goal, app_root, game.id
+            )
+            players_scores = ', '.join(
+                [
+                    '{}{}|{}{}'.format(
+                        '' if p['playing'] else '<s>',  # Add open strikethrough tag if player left game
+                        p['name'],
+                        p['score'],
+                        '' if p['playing'] else '</s>'  # Add close strikethrough tag
+                    ) for p in game.players
+                ]
+            )
+            if game.state == 0:  # Accepting players
+                page += '<td>Awaiting {}</td>'.format(game.num_players - len(game.players))
+                page += '<td>' + ', '.join([p['name'] for p in game.players]) + '</td>'
+            elif game.state == 2:
+                page += '<td><a href="{}/game?id={}">Game over</a></td>'.format(app_root, game.id)
+                page += '<td>' + players_scores + '</td>'
+            elif game.is_players_turn(session_user):  # Playing, player's turn
+                page += '<td><a href="{}/game?id={}">My turn</a></td>'.format(app_root, game.id)
+                page += '<td>' + players_scores + '</td>'
+            else:  # Playing, not player's turn
+                page += '<td><a href="{}/game?id={}">Awaiting Turn</a></td>'.format(app_root, game.id)
+                page += '<td>' + players_scores + '</td>'
+            page += '</tr>\n'
+        page += '</table>'
+        page += '<p><a href="{}/newgame">Start a New Game</a></p>'.format(app_root)
+
+        page += '<h2>Games accepting players</h2>\n'
+        page += '<table><tr><th>Game</th><th>Goal</th><th>Join</th><th>State</th><th>Players</th></tr>\n'
+        games = [
+            RPS(i, p, g, 0, ts, t, db.connection) for i, p, g, ts, t in db.get_registering_games_by_user(session_user)
+            ]
+        for game in games:
+            page += '<tr><td>{}</td><td>{}</td><td><a href="{}/join?id={}">join</a></td>'.format(
+                game.id, game.goal, app_root, game.id
+            )
+            page += '<td>{} of {} players</td>'.format(len(game.players), game.num_players, game.id)
+            page += '<td>' + ', '.join([p['name'] for p in game.players]) + '</td>'
+            page += '</tr>\n'
+        page += '</table>'
+
+        start_response('200 OK', headers)
+        return [(page + '</body></html>').encode()]
+
+    # ----- Register new game -----------------------------------------
+
+    elif path_info == '/newgame':
+        if not session:
             start_response('200 OK', headers)
-            page += 'Logged in {} | <a href="{}/logout">Log out</a></body></html>'.format(session_user, app_root)
-            return [page.encode()]
+            return ['No session'.encode()]
+
+        if 'goal' in params:
+            db.new_game(2, params['goal'][0], session_user)
+            headers.append(('Location', app_root))
+            start_response('303 See Other', headers)
+            return []
+
+        page += '''
+<h2>Create New Game</h2>
+<form>
+    <h3>Play until score:</h3>
+    <input type="radio" name="goal" value="1">1<br>
+    <input type="radio" name="goal" value="3">3<br>
+    <input type="radio" name="goal" value="5">5<br>
+    <input type="radio" name="goal" value="10" checked>10<br>
+    <input type="radio" name="goal" value="20">20<br>
+    <input type="radio" name="goal" value="100">100<br>
+    <input type="submit" value="Create">
+</form>
+</body></html>'''
+
+        start_response('200 OK', headers)
+        return [page.encode()]
+
+    # ----- Join game -----------------------------------------
+
+    elif path_info == '/join':
+        if not session:
+            start_response('200 OK', headers)
+            return ['No session'.encode()]
+
+        game_id = params['id'][0]
+        db.join_game(game_id, session_user)
+
+        headers.append(('Location', app_root))
+        start_response('303 See Other', headers)
+        return []
+
+    # ----- Quit game -----------------------------------------
+
+    elif path_info == '/quit':
+        if not session:
+            start_response('200 OK', headers)
+            return ['No session'.encode()]
+
+        game_id = params['id'][0]
+        db.quit_game(game_id, session_user)
+
+        headers.append(('Location', app_root))
+        start_response('303 See Other', headers)
+        return []
+
+    # ----- Game ------------------------------------------------------------
+
+    elif path_info == '/game':
+        if not session:
+            start_response('200 OK', headers)
+            return ['No session'.encode()]
+
+        game_id = params['id'][0]
+
+        (players, goal, state, ts, turns) = db.get_game_by_id(game_id)
+        game = RPS(game_id, players, goal, state, ts, turns, db.connection)
+        if game.state == 0:  # Error: cannot view game, it is still registering players
+            start_response('200 OK', headers)
+            return [(page + 'Still registering players</body></html>').encode()]
+
+        if 'move' in params:  # Player came here by making a move
+            game.add_player_move(session_user, params['move'][0])
+
+        page += '<a href="{}">Home</a>'.format(app_root)
+        page += ' | <a href="{}/game?id={}">Refresh</a>'.format(app_root, game_id)
+        page += '<h3>Game {} -- Play to {}</h3>'.format(game.id, game.goal)
+
+        if game.state == 2:
+            page += '<p>Game over</p>'
+        elif game.is_players_turn(session_user):
+            page += '<p>Your move: '
+            move_template = '<a href="{}/game?id={}&amp;move={}">{}</a>'
+            move_links = [
+                move_template.format(app_root, game.id, mval, mname) for mval, mname in game.valid_moves(session_user)
+                ]
+            page += ' | '.join(move_links)
+        else:
+            page += '<p>Wait for your turn</p>'
+
+        page += '<table>\n<tr><th>&nbsp;</th>'
+        for p in game.players:
+            page += '<th>{}</th>'.format(p['name']) if p['playing'] else '<th><s>{}</s></th>'.format(p['name'])
+        page += '</tr>\n<tr style="background-color: silver"><td>Round</td>'
+        for p in game.players:
+            page += '<td>{} p</td>'.format(p['score'])
+        page += '</tr>\n'
+
+        for index, turn in enumerate(reversed(game.decorated_moves(session_user))):
+            page += '<tr><td>{}</td>'.format(len(game.turns) - index)
+            for move, winner in turn:
+                if winner:
+                    page += '<td style="background-color:lightgreen">{}</td>'.format(move)
+                else:
+                    page += '<td>{}</td>'.format(move)
+            page += '</tr>\n'
+
+        page += '</table>'
+
+        start_response('200 OK', headers)
+        return [(page + '</body></html>').encode()]
 
     # ----- Dump tables ------------------------------------------------
 
     elif path_info == '/dump':
-        users = db.dump()
+        users, games, players = db.dump()
 
         page += '<a href="{}">Home</a>'.format(app_root)
-        page += ' | <a href="{}/clear_all">Clear users</a>'.format(app_root)
+        page += ' | <a href="{}/clear_games">Clear games and players</a>'.format(app_root)
+        page += ' | <a href="{}/clear_all">Clear all</a>'.format(app_root)
 
         page += '<h2>Table "user"</h2>\n'
         page += '<p>Contains all registered users and their passwords.</p>\n'
         page += '<table><tr><th>name</th><th>password</th></tr>\n'
         for name, password in users:
             page += '<tr><td>{}</td><td>{}</td></tr>\n'.format(name, password)
+        page += '</table>\n'
+
+        page += '<h2>Table "game"</h2>\n'
+        page += '<p>One row for every game.</p>\n'
+        page += '<table><tr><th>rowid</th><th>players</th><th>goal</th><th>state</th><th>ts</th><th>turns</th></tr>\n'
+        for rowid, numplayers, goal, state, ts, turns in games:
+            page += '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n'.format(
+                rowid, numplayers, goal, state, ts, turns
+            )
+        page += '</table>\n'
+
+        page += '<h2>Table "player"</h2>\n'
+        page += '<p>Connects players with games. One row for every player in a game.</p>\n'
+        page += '<table><tr><th>rowid</th><th>game_id</th><th>user_name</th><th>score</th><th>playing</th></tr>\n'
+        for rowid, game_id, user_name, score, playing in players:
+            page += '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n'.format(
+                rowid, game_id, user_name, score, playing
+            )
         page += '</table>\n'
 
         page += '</body></html>'
@@ -120,8 +306,14 @@ def application(e, start_response):
 
     # ----- Clear tables --------------------------------------
 
+    elif path_info == '/clear_games':
+        db.clear_tables(False)
+        headers.append(('Location', '{}/dump'.format(app_root)))
+        start_response('303 See Other', headers)
+        return []
+
     elif path_info == '/clear_all':
-        db.clear_tables()
+        db.clear_tables(True)
         headers.append(('Location', '{}/dump'.format(app_root)))
         start_response('303 See Other', headers)
         return []
