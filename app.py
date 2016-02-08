@@ -1,14 +1,13 @@
 """Main web application.
 
-Uses classes DB and RPS to provide a Rock Paper Scissors game. With a different game class than RPS and slight
-modifications it can be made into another game.
+Uses classes DB and Pyramid to build a pyramid game.
 """
 
 import wsgiref.simple_server
 import urllib.parse
 import http.cookies
 from db_sqlite import DB
-from rps import RPS
+from pyramid import Pyramid
 
 
 def application(e, start_response):
@@ -103,7 +102,9 @@ def application(e, start_response):
 #       page += ' | <a href="{}">Refresh</a>'.format(app_root)
         page += '<h2>My games</h2>\n'
         page += '<table><tr><th>Game</th><th>Goal</th><th>Quit</th><th>State</th><th>Players</th></tr>\n'
-        games = [RPS(i, p, g, st, ts, t, db.connection) for i, p, g, st, ts, t in db.get_games_by_user(session_user)]
+        games = [
+            Pyramid(i, p, g, st, ts, t, db.connection) for i, p, g, st, ts, t in db.get_games_by_user(session_user)
+            ]
         for game in games:
             page += '<tr><td>{}</td><td>{}</td><td><a href="{}/quit?id={}">quit</a></td>'.format(
                 game.id, game.goal, app_root, game.id
@@ -138,7 +139,8 @@ def application(e, start_response):
         page += '<h2>Games accepting players</h2>\n'
         page += '<table><tr><th>Game</th><th>Goal</th><th>Join</th><th>State</th><th>Players</th></tr>\n'
         games = [
-            RPS(i, p, g, 0, ts, t, db.connection) for i, p, g, ts, t in db.get_registering_games_by_user(session_user)
+            Pyramid(i, p, g, 0, ts, t, db.connection)
+            for i, p, g, ts, t in db.get_registering_games_by_user(session_user)
             ]
         for game in games:
             page += '<tr><td>{}</td><td>{}</td><td><a href="{}/join?id={}">join</a></td>'.format(
@@ -182,7 +184,8 @@ def application(e, start_response):
         start_response('200 OK', headers)
         return ['{} {}'.format(ts1, ts2).encode()]
 
-    # ----- Register new game -----------------------------------------
+    # ----- Register new game ---------------------------------------------------------------
+    # ***** MODIFY THIS PART TO ASK FOR NUMBER OF PLAYERS AND RECEIVE NUMBER OF PLAYERS *****
 
     elif path_info == '/newgame':
         if not session:
@@ -250,7 +253,7 @@ def application(e, start_response):
         game_id = params['id'][0]
 
         (players, goal, state, ts, turns) = db.get_game_by_id(game_id)
-        game = RPS(game_id, players, goal, state, ts, turns, db.connection)
+        game = Pyramid(game_id, players, goal, state, ts, turns, db.connection)
         if game.state == 0:  # Error: cannot view game, it is still registering players
             start_response('200 OK', headers)
             return [(page + 'Still registering players</body></html>').encode()]

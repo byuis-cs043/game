@@ -1,15 +1,13 @@
-"""Rock Paper Scissors game logic
+"""Skeleton for Pyramid game
 
-The RPS class provides all the logic for Rock Paper Scissor games. It inherits the basic functionality provided
-by the Game class. To make a different game, replace the RPS class by another that provides the new game logic.
-
-When a user accesses a game e.g. to make a move, an RPS object is constructed from information in the database.
+The code below is still the same as for Rock-Paper-Scissors.
+Modify to implement the Pyramid game.
 """
 
 from db_sqlite import Game
 
 
-class RPS(Game):
+class Pyramid(Game):
     def valid_moves(self, username):
         """Return list of pairs with valid moves for this player and how to display them.
 
