@@ -3,17 +3,16 @@
 import wsgiref.simple_server
 import urllib.parse
 import http.cookies
-import sqlite3
+from db_sqlite import DB
 
 
 def application(e, start_response):
+    db = DB()
 
     headers = [('Content-Type', 'text/html; charset=utf-8')]
     app_root = urllib.parse.urlunsplit((e['wsgi.url_scheme'], e['HTTP_HOST'], e['SCRIPT_NAME'], '', ''))
     params = urllib.parse.parse_qs(e['QUERY_STRING'])
     path_info = e['PATH_INFO']
-    connection = sqlite3.connect('game.db')
-    cursor = connection.cursor()
 
     # ----- If user has valid session cookie set session = True --------------------
 
@@ -24,8 +23,7 @@ def application(e, start_response):
         cookies.load(e['HTTP_COOKIE'])
         if 'session' in cookies:
             session_user, session_pass = cookies['session'].value.split(':')
-            cursor.execute('SELECT name FROM user WHERE name = ? AND password = ?', [session_user, session_pass])
-            session = True if cursor.fetchone() else False
+            session = db.user_pass_valid(session_user, session_pass)
 
     # ----- The common start of every page ---------------------------
 
@@ -55,8 +53,7 @@ def application(e, start_response):
 </form>'''
 
         if param_do == 'Login' and param_user and param_pass:
-            cursor.execute('SELECT name FROM user WHERE name = ? AND password = ?', [param_user, param_pass])
-            if cursor.fetchone():
+            if db.user_pass_valid(param_user, param_pass):
                 headers.append(('Set-Cookie', 'session={}:{}'.format(param_user, param_pass)))
                 headers.append(('Location', app_root))
                 start_response('303 See Other', headers)
@@ -67,19 +64,15 @@ def application(e, start_response):
                 return [(page + 'Wrong username or password</body></html>').encode()]
 
         elif param_do == 'Register' and param_user and param_pass:
-            cursor.execute('SELECT name FROM user WHERE name = ?', [param_user])
-            if cursor.fetchone():  # Username taken
+            if db.add_username(param_user, param_pass):
+                headers.append(('Set-Cookie', 'session={}:{}'.format(param_user, param_pass)))
+                headers.append(('Location', app_root))
+                start_response('303 See Other', headers)
+                return []
+            else:
                 start_response('200 OK', headers)
                 page += login_register_form
                 return [(page + 'Username {} is taken.</body></html>'.format(param_user)).encode()]
-
-            cursor.execute('INSERT INTO user (name, password) VALUES (?, ?)', [param_user, param_pass])
-            connection.commit()
-
-            headers.append(('Set-Cookie', 'session={}:{}'.format(param_user, param_pass)))
-            headers.append(('Location', app_root))
-            start_response('303 See Other', headers)
-            return []
 
         else:
             start_response('200 OK', headers)
@@ -108,8 +101,7 @@ def application(e, start_response):
     # ----- Dump tables ------------------------------------------------
 
     elif path_info == '/dump':
-        cursor.execute('SELECT name, password FROM user')
-        users = cursor.fetchall()
+        users = db.dump()
 
         page += '<a href="{}">Home</a>'.format(app_root)
         page += ' | <a href="{}/clear_all">Clear users</a>'.format(app_root)
@@ -129,9 +121,7 @@ def application(e, start_response):
     # ----- Clear tables --------------------------------------
 
     elif path_info == '/clear_all':
-        cursor.execute('DELETE FROM user')
-        connection.commit()
-
+        db.clear_tables()
         headers.append(('Location', '{}/dump'.format(app_root)))
         start_response('303 See Other', headers)
         return []
