@@ -91,6 +91,25 @@ class DB:
         elif players_in_game > max_players:  # Too many players
             self.connection.rollback()
 
+    def updated_games(self, username):
+        cursor = self.connection.cursor()
+        cursor.execute(  # Find latest timestamps of players' game joins, quits, moves where user himself has not quit
+            'SELECT max(ts) FROM game, player '
+            'WHERE player.user_name = ? AND player.playing AND player.game_id = game.rowid ', [username])
+        (latest_timestamp_of_running_games,) = cursor.fetchone()
+        cursor.execute(  # Latest timestamps of games waiting for registrations
+            'SELECT max(ts) FROM game, ('
+            ' SELECT rowid game_id FROM game WHERE state = 0 AND rowid NOT IN ('
+            '  SELECT game.rowid FROM game, player'
+            '  WHERE state = 0 AND game.rowid = player.game_id AND player.user_name = ?'
+            ' )'
+            ') registering '
+            'WHERE game.rowid = registering.game_id', [username]
+        )
+
+        (latest_timestamp_of_registering_games,) = cursor.fetchone()
+        return latest_timestamp_of_running_games, latest_timestamp_of_registering_games
+
     def quit_game(self, game_id, username):
         cursor = self.connection.cursor()
         cursor.execute(

@@ -100,7 +100,7 @@ def application(e, start_response):
             return [page.encode()]
 
         page += '{} | <a href="{}/logout">Logout</a>'.format(session_user, app_root)
-        page += ' | <a href="{}">Refresh</a>'.format(app_root)
+#       page += ' | <a href="{}">Refresh</a>'.format(app_root)
         page += '<h2>My games</h2>\n'
         page += '<table><tr><th>Game</th><th>Goal</th><th>Quit</th><th>State</th><th>Players</th></tr>\n'
         games = [RPS(i, p, g, st, ts, t, db.connection) for i, p, g, st, ts, t in db.get_games_by_user(session_user)]
@@ -133,6 +133,7 @@ def application(e, start_response):
             page += '</tr>\n'
         page += '</table>'
         page += '<p><a href="{}/newgame">Start a New Game</a></p>'.format(app_root)
+        ts1 = max(game.ts for game in games) if games else None
 
         page += '<h2>Games accepting players</h2>\n'
         page += '<table><tr><th>Game</th><th>Goal</th><th>Join</th><th>State</th><th>Players</th></tr>\n'
@@ -147,9 +148,39 @@ def application(e, start_response):
             page += '<td>' + ', '.join([p['name'] for p in game.players]) + '</td>'
             page += '</tr>\n'
         page += '</table>'
+        ts2 = max(game.ts for game in games) if games else None
+
+        page += '''
+<script>
+    function callback(event) {{
+        if (event.target.readyState == 4 && event.target.responseText != '{} {}') {{
+            window.location = '{}'
+        }}
+    }}
+    function timeFunc(event) {{
+        var xmlhttp = new XMLHttpRequest();
+        xmlhttp.addEventListener("readystatechange", callback)
+        xmlhttp.open("GET", "{}/updated_games", true)
+        xmlhttp.setRequestHeader("Content-Type", "text/plain")
+        xmlhttp.send()
+    }}
+    setInterval(timeFunc, 1000)
+</script>'''.format(ts1, ts2, app_root, app_root)
 
         start_response('200 OK', headers)
         return [(page + '</body></html>').encode()]
+
+    # ----- Check if game list changed -------------------------------------------
+
+    elif path_info == '/updated_games':
+        if not session:
+            start_response('200 OK', headers)
+            return ['No session'.encode()]
+
+        ts1, ts2 = db.updated_games(session_user)
+
+        start_response('200 OK', headers)
+        return ['{} {}'.format(ts1, ts2).encode()]
 
     # ----- Register new game -----------------------------------------
 
@@ -228,7 +259,7 @@ def application(e, start_response):
             game.add_player_move(session_user, params['move'][0])
 
         page += '<a href="{}">Home</a>'.format(app_root)
-        page += ' | <a href="{}/game?id={}">Refresh</a>'.format(app_root, game_id)
+#       page += ' | <a href="{}/game?id={}">Refresh</a>'.format(app_root, game_id)
         page += '<h3>Game {} -- Play to {}</h3>'.format(game.id, game.goal)
 
         if game.state == 2:
@@ -262,8 +293,37 @@ def application(e, start_response):
 
         page += '</table>'
 
+        if game.state == 1:
+            page += '''
+<script>
+    function callback(event) {{
+        if (event.target.readyState == 4 && event.target.responseText != '{}') {{
+            window.location = '{}/game?id={}'
+        }}
+    }}
+    function timeFunc(event) {{
+        var xmlhttp = new XMLHttpRequest();
+        xmlhttp.addEventListener("readystatechange", callback)
+        xmlhttp.open("GET", "{}/updated_game?id={}", true)
+        xmlhttp.setRequestHeader("Content-Type", "text/plain")
+        xmlhttp.send()
+    }}
+    setInterval(timeFunc, 1000)
+</script>'''.format(game.ts, app_root, game.id, app_root, game.id)
+
         start_response('200 OK', headers)
         return [(page + '</body></html>').encode()]
+
+    # ----- Check if game changed --------------------------------------
+
+    elif path_info == '/updated_game':
+        if not session:
+            start_response('200 OK', headers)
+            return ['No session'.encode()]
+
+        start_response('200 OK', headers)
+        p, g, s, ts, t = db.get_game_by_id(params['id'][0])
+        return ['{}'.format(ts).encode()]
 
     # ----- Dump tables ------------------------------------------------
 
