@@ -1,21 +1,20 @@
-"""All sqlite3 dependencies.
+"""All MySQL dependencies."""
 
-All sqlite3 dependent code is collected in this module. The rest of the game app will be isolated from direct
-interaction with sqlite3. This makes it easy to replace sqlite3 with a different database. Only the code in this
-module needs to be adapted for a different database. The rest of the app will work the same.
-"""
-
-import sqlite3
+import pymysql
+import json
 
 
 class DB:
     """Miscellaneous functions for checking username & password, fetching games, updating scores etc."""
     def __init__(self):
-        self.connection = sqlite3.connect('game.db')
+        self.connection = pymysql.connect(
+            unix_socket='/var/run/mysqld/mysqld.sock',
+            user='umpire', passwd='fda323rf', db='game'
+        )
 
     def user_pass_valid(self, username, password):
         cursor = self.connection.cursor()
-        cursor.execute('SELECT name FROM user WHERE name = ? AND password = ?', [username, password])
+        cursor.execute('SELECT name FROM user WHERE name = %s AND password = %s', [username, password])
         if cursor.fetchone():
             return True
         else:
@@ -23,11 +22,11 @@ class DB:
 
     def add_username(self, username, password):
         cursor = self.connection.cursor()
-        cursor.execute('SELECT name FROM user WHERE name = ?', [username])
+        cursor.execute('SELECT name FROM user WHERE name = %s', [username])
         if cursor.fetchone():
             return False
         else:
-            cursor.execute('INSERT INTO user (name, password) VALUES (?, ?)', [username, password])
+            cursor.execute('INSERT INTO user (name, password) VALUES (%s, %s)', [username, password])
             self.connection.commit()
             return True
 

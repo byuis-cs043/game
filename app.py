@@ -1,9 +1,8 @@
 """Main web application."""
 
-import wsgiref.simple_server
 import urllib.parse
 import http.cookies
-from db_sqlite import DB
+from db_mysql import DB
 
 
 def application(e, start_response):
@@ -131,6 +130,3 @@ def application(e, start_response):
     else:
         start_response('200 OK', headers)
         return [(page + 'Unknown Web app {}</body></html>'.format(path_info)).encode()]
-
-httpd = wsgiref.simple_server.make_server('', 8000, application)
-httpd.serve_forever()
